@@ -1,0 +1,31 @@
+CAFETERA - mantiene Teams en "Disponible"
+==========================================
+
+Que hace
+--------
+Cada ~60 s pulsa una tecla "invisible" (F15 por defecto). F13-F24 existen
+para Windows pero no en tu teclado, asi que ninguna aplicacion reacciona a
+ellas. Windows y Teams lo cuentan como actividad y no pasan a "Ausente".
+Ademas (opcional) evita que el PC se suspenda o apague la pantalla.
+
+Uso
+---
+- Ejecuta Cafetera.exe. No abre ventana: aparece un ojo junto al reloj.
+  (En Windows 11 puede quedar escondida en la flecha ^; arrastrala fuera.)
+- Ojo abierto = activa; ojo cerrado negro = en espera
+  (fuera de horario); ojo cerrado gris = desactivada.
+- Clic derecho: cambiar modo (Segun horario / Siempre activa / Desactivada),
+  Configuracion..., Iniciar con Windows, Salir.
+- 2 clics en el ojo: activa / desactiva.
+- 3 clics en el ojo: abre la configuracion.
+
+Por defecto: lunes a viernes de 07:00 a 17:00, F15 cada 60 s, solo si no
+has tocado teclado/raton en ese minuto, e iniciar con Windows activado.
+
+Configuracion guardada en: %APPDATA%\Cafetera\config.ini
+
+Recompilar
+----------
+Doble clic en compilar.bat (usa el compilador de .NET que ya trae Windows).
+
+Ojo: con la sesion bloqueada (Win+L) Teams se pone Ausente igualmente.
