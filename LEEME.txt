@@ -28,8 +28,9 @@ Uso
 - Cada: flechas, rueda, o clic en el centro para escribirlo (1:30, 90...).
 - Boton rojo "Cerrar app": cierra Cafetera del todo.
 
-Por defecto: lunes a viernes de 07:00 a 17:00, F15 cada 60 s, solo si no
-has tocado teclado/raton en ese minuto, e iniciar con Windows activado.
+Por defecto: lunes a viernes de 07:00 a 17:00, Mayus (Shift) cada 1 min
+(minimo 5 s), solo si no has tocado teclado/raton en ese tiempo, sin
+impedir la suspension del PC, e iniciar con Windows activado.
 
 Configuracion guardada en: %APPDATA%\Cafetera\config.ini
 

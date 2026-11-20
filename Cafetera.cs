@@ -97,9 +97,9 @@ namespace Cafetera
         public int InicioMin = 7 * 60;
         public int FinMin = 17 * 60;
         public int IntervaloSeg = 60;
-        public int Accion = 0x7E;   // F15. VK de la tecla, o -1/-2/-3 = clic izquierdo/derecho/central
+        public int Accion = 0x10;   // Mayús (Shift). VK de la tecla, o -1/-2/-3 = clic izquierdo/derecho/central
         public bool SoloSiInactivo = true;
-        public bool EvitarSuspension = true;
+        public bool EvitarSuspension = false;
 
         public static string Carpeta
         {
@@ -221,7 +221,7 @@ namespace Cafetera
                             break;
                         case "inicio": c.InicioMin = LeerHora(v, c.InicioMin); break;
                         case "fin": c.FinMin = LeerHora(v, c.FinMin); break;
-                        case "intervalo": c.IntervaloSeg = Limitar(int.Parse(v), 10, 3600); break;
+                        case "intervalo": c.IntervaloSeg = Limitar(int.Parse(v), 5, 3600); break;
                         case "tecla": c.Accion = LeerAccion(v, c.Accion); break;
                         case "solosiinactivo": c.SoloSiInactivo = LeerBool(v); break;
                         case "evitarsuspension": c.EvitarSuspension = LeerBool(v); break;
@@ -954,7 +954,7 @@ namespace Cafetera
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
             TopMost = true;
-            ClientSize = new Size(420, 176);
+            ClientSize = new Size(420, 196);
 
             Label titulo = new Label();
             titulo.Text = "¿Cerrar Cafetera del todo?";
@@ -970,15 +970,15 @@ namespace Cafetera
                          "usa el modo \"Apagada\" o haz un clic en el icono.";
             texto.ForeColor = Tema.Suave;
             texto.Location = new Point(20, 52);
-            texto.Size = new Size(380, 64);
+            texto.Size = new Size(380, 80);
             Controls.Add(texto);
 
             Boton cerrar = new Boton("Cerrar app", false);
             cerrar.Peligro = true;
-            cerrar.Location = new Point(420 - 20 - 110, 124);
+            cerrar.Location = new Point(420 - 20 - 110, 142);
             cerrar.Click += delegate { DialogResult = DialogResult.OK; Close(); };
             Boton cancelar = new Boton("Cancelar", false);
-            cancelar.Location = new Point(420 - 20 - 110 - 12 - 110, 124);
+            cancelar.Location = new Point(420 - 20 - 110 - 12 - 110, 142);
             cancelar.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
             Controls.Add(cerrar);
             Controls.Add(cancelar);
@@ -1139,7 +1139,7 @@ namespace Cafetera
 
             Etiqueta(tPul, "Cada", 16, 108, Font, Tema.Texto);
             selIntervalo = new Selector();
-            selIntervalo.Min = 10; selIntervalo.Max = 3600; selIntervalo.Paso = 5;
+            selIntervalo.Min = 5; selIntervalo.Max = 3600; selIntervalo.Paso = 5;
             selIntervalo.Formato = Intervalo;
             selIntervalo.EditableTexto = true;
             selIntervalo.TextoEdicion = MinSeg;
