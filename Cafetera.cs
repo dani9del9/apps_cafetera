@@ -234,7 +234,7 @@ namespace Cafetera
 
         public static Icon Crear(int estado, Color c) { return Crear(estado, c, false); }
 
-        public static Icon Crear(int estado, Color c, bool reloj)
+        public static Icon Crear(int estado, Color c, bool punto)
         {
             int s = Math.Max(16, SystemInformation.SmallIconSize.Width);
             using (Bitmap bmp = new Bitmap(s, s))
@@ -242,14 +242,14 @@ namespace Cafetera
                 using (Graphics g = Graphics.FromImage(bmp))
                 {
                     g.Clear(Color.Transparent);
-                    if (reloj)
+                    Pintar(g, 0, 0, s, estado, c);
+                    if (punto)
                     {
-                        // Ojo algo más pequeño arriba a la izquierda y el reloj en la esquina
-                        float u = s / 16f;
-                        Pintar(g, 0, 0.24f * u, s * 0.82f, estado, c);
-                        PintarReloj(g, s, c);
+                        // Puntito abajo a la derecha (modo "Según horario")
+                        float u = s / 16f, r = 1.7f * u;
+                        using (SolidBrush b = new SolidBrush(c))
+                            g.FillEllipse(b, 14.0f * u - r, 13.9f * u - r, 2 * r, 2 * r);
                     }
-                    else Pintar(g, 0, 0, s, estado, c);
                 }
                 return Icon.FromHandle(bmp.GetHicon());   // se crean al arrancar y viven toda la ejecución
             }
@@ -289,29 +289,6 @@ namespace Cafetera
                 }
             }
             g.Restore(st);
-        }
-
-        // Relojito en la esquina inferior derecha (modo "Según horario").
-        // Se recorta un hueco transparente alrededor para que no se mezcle con el ojo.
-        static void PintarReloj(Graphics g, float s, Color c)
-        {
-            float u = s / 16f;
-            float cx = 12.9f * u, cy = 12.9f * u, r = 3.0f * u, hueco = r + 0.9f * u;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            CompositingMode anterior = g.CompositingMode;
-            g.CompositingMode = CompositingMode.SourceCopy;
-            using (SolidBrush transp = new SolidBrush(Color.Transparent))
-                g.FillEllipse(transp, cx - hueco, cy - hueco, 2 * hueco, 2 * hueco);
-            using (SolidBrush b = new SolidBrush(c))
-                g.FillEllipse(b, cx - r, cy - r, 2 * r, 2 * r);
-            using (Pen agujas = new Pen(Color.Transparent, Math.Max(1f, 1.1f * u)))
-            {
-                agujas.StartCap = LineCap.Round; agujas.EndCap = LineCap.Round;
-                g.DrawLine(agujas, cx, cy, cx, cy - r * 0.62f);
-                g.DrawLine(agujas, cx, cy, cx + r * 0.5f, cy);
-            }
-            g.CompositingMode = anterior;
         }
     }
 
@@ -737,246 +714,6 @@ namespace Cafetera
         }
     }
 
-    // ------------------------------------------------------------------ Registro de actividad (última hora)
-    // Guarda, por segundo, el nivel máximo de actividad: 0 = nada, 1 = teclado / ratón, 2 = clic.
-    // No guarda QUÉ teclas se pulsan, solo que hubo actividad.
-    static class Actividad
-    {
-        const int N = 3600;
-        static long[] segundo = new long[N];
-        static byte[] nivel = new byte[N];
-        static bool[] auto = new bool[N];
-        public static readonly long Arranque = SegundoActual;
-
-        public static long SegundoActual { get { return DateTime.Now.Ticks / TimeSpan.TicksPerSecond; } }
-
-        static int Hueco(long s)
-        {
-            int i = (int)(s % N);
-            if (segundo[i] != s) { segundo[i] = s; nivel[i] = 0; auto[i] = false; }
-            return i;
-        }
-
-        public static void Registrar(int n)
-        {
-            int i = Hueco(SegundoActual);
-            if (n > nivel[i]) nivel[i] = (byte)n;
-        }
-
-        public static void RegistrarAuto()
-        {
-            int i = Hueco(SegundoActual);
-            nivel[i] = 2;
-            auto[i] = true;
-        }
-
-        public static int Nivel(long s, out bool esAuto)
-        {
-            int i = (int)(((s % N) + N) % N);
-            if (segundo[i] != s) { esAuto = false; return 0; }
-            esAuto = auto[i];
-            return nivel[i];
-        }
-    }
-
-    // Escucha teclado y ratón en segundo plano con Raw Input (sin hooks)
-    class MonitorEntrada : NativeWindow
-    {
-        [StructLayout(LayoutKind.Sequential)]
-        struct RAWINPUTDEVICE { public ushort usUsagePage; public ushort usUsage; public uint dwFlags; public IntPtr hwndTarget; }
-
-        [DllImport("user32.dll", SetLastError = true)]
-        static extern bool RegisterRawInputDevices(RAWINPUTDEVICE[] dispositivos, uint n, uint cbSize);
-        [DllImport("user32.dll")]
-        static extern uint GetRawInputData(IntPtr hRawInput, uint uiCommand, IntPtr pData, ref uint pcbSize, uint cbSizeHeader);
-
-        const int WM_INPUT = 0x00FF;
-        const uint RID_INPUT = 0x10000003;
-        const uint RIDEV_INPUTSINK = 0x00000100;
-        const int RIM_TYPEMOUSE = 0, RIM_TYPEKEYBOARD = 1;
-        const int BOTONES_ABAJO = 0x0001 | 0x0004 | 0x0010 | 0x0040 | 0x0100;
-        const int RUEDA = 0x0400 | 0x0800;
-
-        IntPtr buffer = IntPtr.Zero;
-        uint tamBuffer = 0;
-
-        public bool Activo { get; private set; }
-
-        public MonitorEntrada()
-        {
-            CreateHandle(new CreateParams());   // ventana oculta, solo para recibir WM_INPUT
-            RAWINPUTDEVICE[] d = new RAWINPUTDEVICE[2];
-            d[0].usUsagePage = 0x01; d[0].usUsage = 0x02; d[0].dwFlags = RIDEV_INPUTSINK; d[0].hwndTarget = Handle; // ratón
-            d[1].usUsagePage = 0x01; d[1].usUsage = 0x06; d[1].dwFlags = RIDEV_INPUTSINK; d[1].hwndTarget = Handle; // teclado
-            Activo = RegisterRawInputDevices(d, 2, (uint)Marshal.SizeOf(typeof(RAWINPUTDEVICE)));
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            if (m.Msg == WM_INPUT)
-            {
-                try { Procesar(m.LParam); } catch { }
-            }
-            base.WndProc(ref m);
-        }
-
-        void Procesar(IntPtr hRaw)
-        {
-            uint cab = (uint)(8 + 2 * IntPtr.Size);   // RAWINPUTHEADER
-            uint tam = 0;
-            GetRawInputData(hRaw, RID_INPUT, IntPtr.Zero, ref tam, cab);
-            if (tam == 0) return;
-            if (tam > tamBuffer)
-            {
-                if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer);
-                buffer = Marshal.AllocHGlobal((int)tam);
-                tamBuffer = tam;
-            }
-            if (GetRawInputData(hRaw, RID_INPUT, buffer, ref tam, cab) != tam) return;
-
-            int tipo = Marshal.ReadInt32(buffer, 0);
-            int o = (int)cab;
-            if (tipo == RIM_TYPEKEYBOARD)
-            {
-                int flags = Marshal.ReadInt16(buffer, o + 2) & 0xFFFF;
-                int vk = Marshal.ReadInt16(buffer, o + 6) & 0xFFFF;
-                if ((flags & 1) != 0) return;                 // soltar tecla: no cuenta
-                if (vk >= 0x7C && vk <= 0x87) return;        // F13-F24: las autopulsaciones van aparte
-                Actividad.Registrar(1);
-            }
-            else if (tipo == RIM_TYPEMOUSE)
-            {
-                int botones = Marshal.ReadInt16(buffer, o + 4) & 0xFFFF;
-                int dx = Marshal.ReadInt32(buffer, o + 12);
-                int dy = Marshal.ReadInt32(buffer, o + 16);
-                if ((botones & BOTONES_ABAJO) != 0) Actividad.Registrar(2);
-                else if ((botones & RUEDA) != 0 || dx != 0 || dy != 0) Actividad.Registrar(1);
-            }
-        }
-
-        public void Cerrar()
-        {
-            DestroyHandle();
-            if (buffer != IntPtr.Zero) { Marshal.FreeHGlobal(buffer); buffer = IntPtr.Zero; }
-        }
-    }
-
-    // Gráfica de escalón con 3 niveles y puntos amarillos para las autopulsaciones
-    class GraficaActividad : Control
-    {
-        public GraficaActividad()
-        {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            Graphics g = e.Graphics;
-            g.Clear(BackColor);
-            Tema.Suavizar(g);
-            float esc = g.DpiX / 96f;
-
-            using (Font f = new Font("Segoe UI", 8F))
-            {
-                string[] etiquetas = { "Inactivo", "Teclado / ratón", "Clic" };
-                int mIzq = 0;
-                foreach (string et in etiquetas) mIzq = Math.Max(mIzq, TextRenderer.MeasureText(et, f).Width);
-                mIzq += (int)(12 * esc);
-                int mDer = (int)(8 * esc), mSup = (int)(10 * esc), mInf = (int)(22 * esc);
-                Rectangle area = new Rectangle(mIzq, mSup, Width - mIzq - mDer, Height - mSup - mInf);
-                if (area.Width < 20 || area.Height < 20) return;
-
-                // Niveles
-                float[] yNivel = new float[3];
-                for (int n = 0; n < 3; n++) yNivel[n] = area.Bottom - n * area.Height / 2f;
-                using (Pen guia = new Pen(Color.FromArgb(0x33, 0x36, 0x3C), 1f))
-                {
-                    guia.DashStyle = DashStyle.Dot;
-                    for (int n = 0; n < 3; n++)
-                    {
-                        g.DrawLine(guia, area.Left, yNivel[n], area.Right, yNivel[n]);
-                        TextRenderer.DrawText(g, etiquetas[n], f,
-                            new Rectangle(0, (int)yNivel[n] - 10, mIzq - (int)(8 * esc), 20), Tema.Suave,
-                            TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                    }
-                }
-
-                // Ventana de tiempo: desde el arranque, mínimo 5 min y máximo 60 min
-                long ahora = Actividad.SegundoActual;
-                long span = Math.Max(300, Math.Min(3600, ahora - Actividad.Arranque + 1));
-                long inicio = ahora - span + 1;
-
-                int w = area.Width;
-                int[] lvl = new int[w];
-                bool[] aut = new bool[w];
-                for (int x = 0; x < w; x++)
-                {
-                    long a = inicio + (long)x * span / w;
-                    long b = inicio + (long)(x + 1) * span / w;
-                    if (b <= a) b = a + 1;
-                    for (long s = a; s < b; s++)
-                    {
-                        if (s < Actividad.Arranque) continue;
-                        bool au;
-                        int n = Actividad.Nivel(s, out au);
-                        if (n > lvl[x]) lvl[x] = n;
-                        if (au) aut[x] = true;
-                    }
-                }
-
-                // Línea en escalón + relleno
-                PointF[] pts = new PointF[w * 2];
-                for (int x = 0; x < w; x++)
-                {
-                    float y = yNivel[lvl[x]];
-                    pts[2 * x] = new PointF(area.Left + x, y);
-                    pts[2 * x + 1] = new PointF(area.Left + x + 1, y);
-                }
-                using (GraphicsPath relleno = new GraphicsPath())
-                {
-                    relleno.AddLine(area.Left, area.Bottom, pts[0].X, pts[0].Y);
-                    relleno.AddLines(pts);
-                    relleno.AddLine(pts[pts.Length - 1].X, pts[pts.Length - 1].Y, area.Right, area.Bottom);
-                    relleno.CloseFigure();
-                    using (SolidBrush b = new SolidBrush(Color.FromArgb(40, Tema.Acento))) g.FillPath(b, relleno);
-                }
-                using (Pen linea = new Pen(Tema.Acento, 1.6f * esc))
-                {
-                    linea.LineJoin = LineJoin.Round;
-                    g.DrawLines(linea, pts);
-                }
-
-                // Autopulsaciones
-                float r = 3.6f * esc;
-                using (SolidBrush amarillo = new SolidBrush(Tema.Ambar))
-                using (Pen contorno = new Pen(BackColor, 1.2f * esc))
-                {
-                    int ultimo = -1000;
-                    for (int x = 0; x < w; x++)
-                    {
-                        if (!aut[x] || x - ultimo < r) continue;
-                        ultimo = x;
-                        float cx = area.Left + x + 0.5f, cy = yNivel[2];
-                        g.FillEllipse(amarillo, cx - r, cy - r, 2 * r, 2 * r);
-                        g.DrawEllipse(contorno, cx - r, cy - r, 2 * r, 2 * r);
-                    }
-                }
-
-                // Eje de tiempo
-                int pasoMin = span > 1800 ? 15 : (span > 600 ? 5 : 1);
-                int yEje = area.Bottom + (int)(5 * esc);
-                for (int min = pasoMin; min * 60 < span; min += pasoMin)
-                {
-                    float x = area.Right - (float)min * 60 * area.Width / span;
-                    TextRenderer.DrawText(g, "-" + min + " min", f, new Point((int)x - 18, yEje), Tema.Suave);
-                }
-                Size ta = TextRenderer.MeasureText("ahora", f);
-                TextRenderer.DrawText(g, "ahora", f, new Point(area.Right - ta.Width + 4, yEje), Tema.Suave);
-            }
-        }
-    }
-
     // ------------------------------------------------------------------ Ventana de configuración (modo oscuro)
     class FormConfig : Form
     {
@@ -987,7 +724,6 @@ namespace Cafetera
         Pastilla[] dias = new Pastilla[7];   // orden L..D
         Selector selDesde, selHasta, selTecla, selIntervalo;
         Interruptor swInactivo, swSuspension, swInicio;
-        GraficaActividad grafica;
         System.Windows.Forms.Timer refresco;
 
         public Config Resultado;
@@ -1025,7 +761,7 @@ namespace Cafetera
             MaximizeBox = false; MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             TopMost = true;
-            ClientSize = new Size(768, 648);
+            ClientSize = new Size(768, 432);
 
             const int izq = 16, der = 392, ancho = 360;
 
@@ -1097,15 +833,6 @@ namespace Cafetera
 
             swInactivo = Fila(tPul, "Solo si no estoy tocando nada", 118, cfg.SoloSiInactivo, ancho);
 
-            // ---------- Gráfica de actividad
-            Tarjeta tGraf = Tarjeta_("Actividad · última hora", izq, 432, 2 * ancho + 16, 200);
-            Label punto = Etiqueta(tGraf, "●", 2 * ancho + 16 - 16 - 112, 9, new Font("Segoe UI", 9F), Tema.Ambar);
-            Etiqueta(tGraf, "autopulsación", 2 * ancho + 16 - 16 - 96, 11, new Font("Segoe UI", 8F), Tema.Suave);
-            grafica = new GraficaActividad();
-            grafica.Location = new Point(10, 36);
-            grafica.Size = new Size(2 * ancho + 16 - 26, 154);
-            tGraf.Controls.Add(grafica);
-
             // ---------- Botones
             Boton guardar = new Boton("Guardar", true);
             guardar.Location = new Point(der + ancho - 110, 380);
@@ -1166,7 +893,6 @@ namespace Cafetera
                                (n == 1 ? " pulsación" : " pulsaciones") + " desde el arranque";
             }
             lblInactivo.Text = "Windows te ve inactivo desde " + Hace(Nativo.SegundosInactivo());
-            grafica.Invalidate();
         }
 
         void Guardar()
@@ -1238,9 +964,8 @@ namespace Cafetera
         Config cfg;
         NotifyIcon icono;
         System.Windows.Forms.Timer timer;
-        Icon icoActivo, icoReloj, icoOff, icoVentana;
+        Icon icoActivo, icoPunto, icoOff, icoVentana;
         int pulsaciones = 0;
-        MonitorEntrada monitor;
 
         public DateTime UltimaPulsacion { get { return ultimaPulsacion; } }
         public int Pulsaciones { get { return pulsaciones; } }
@@ -1249,7 +974,6 @@ namespace Cafetera
         public void ProbarAhora()
         {
             Nativo.PulsarTecla(cfg.Tecla);
-            Actividad.RegistrarAuto();
             ultimaPulsacion = DateTime.Now;
             pulsaciones++;
         }
@@ -1266,9 +990,9 @@ namespace Cafetera
             bool nuevo;
             cfg = Config.Cargar(out nuevo);
 
-            // 3 iconos según el modo: Siempre = ojo · Según horario = ojo con reloj · Apagada = ojo cerrado
+            // 3 iconos según el modo: Siempre = ojo · Según horario = ojo con puntito · Apagada = ojo cerrado
             icoActivo = Iconos.Crear(0, Color.Black);
-            icoReloj = Iconos.Crear(0, Color.Black, true);
+            icoPunto = Iconos.Crear(0, Color.Black, true);
             icoOff = Iconos.Crear(2, Iconos.Gris);
             icoVentana = Iconos.Crear(0, Tema.Acento);
 
@@ -1302,7 +1026,7 @@ namespace Cafetera
             menu.Opening += delegate { RefrescarMenu(); };
 
             icono = new NotifyIcon();
-            icono.Icon = icoReloj;
+            icono.Icon = icoPunto;
             icono.Text = "Cafetera";
             icono.ContextMenuStrip = menu;
             icono.Visible = true;
@@ -1332,8 +1056,6 @@ namespace Cafetera
             {
                 InicioWindows.Establecer(true);   // actualiza la ruta por si se ha movido el .exe
             }
-
-            try { monitor = new MonitorEntrada(); } catch { monitor = null; }
 
             timer = new System.Windows.Forms.Timer();
             timer.Interval = 5000;
@@ -1365,7 +1087,6 @@ namespace Cafetera
             if (toca)
             {
                 Nativo.PulsarTecla(cfg.Tecla);
-                Actividad.RegistrarAuto();
                 ultimaPulsacion = ahora;
                 pulsaciones++;
             }
@@ -1392,7 +1113,7 @@ namespace Cafetera
 
         void ActualizarIcono()
         {
-            if (cfg.Modo == Modo.Horario) icono.Icon = icoReloj;
+            if (cfg.Modo == Modo.Horario) icono.Icon = icoPunto;
             else icono.Icon = cfg.Modo == Modo.SiempreActivo ? icoActivo : icoOff;
             string t = "Cafetera - " + TextoEstado();
             icono.Text = t.Length > 63 ? t.Substring(0, 63) : t;
@@ -1463,7 +1184,6 @@ namespace Cafetera
         {
             timer.Stop();
             timerClics.Stop();
-            if (monitor != null) monitor.Cerrar();
             MantenerDespierto(false);
             icono.Visible = false;
             icono.Dispose();
