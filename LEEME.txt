@@ -22,6 +22,11 @@ Uso
   izquierda ves la hora de la ultima pulsacion, cuantas lleva y cuanto
   tiempo lleva Windows sin detectar actividad (si funciona, nunca pasa
   mucho del intervalo). "Probar ahora" pulsa la tecla al momento.
+- Tecla: con las flechas eliges F13-F24; con un clic en el centro y
+  pulsando cualquier tecla o boton del raton, usa esa (un clic de raton
+  se hace donde este el cursor).
+- Cada: flechas, rueda, o clic en el centro para escribirlo (1:30, 90...).
+- Boton rojo "Cerrar app": cierra Cafetera del todo.
 
 Por defecto: lunes a viernes de 07:00 a 17:00, F15 cada 60 s, solo si no
 has tocado teclado/raton en ese minuto, e iniciar con Windows activado.

@@ -7,6 +7,7 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -46,14 +47,43 @@ namespace Cafetera
             return diff / 1000.0;
         }
 
-        // numeroF: 1..24  (F1 = 0x70 ... F24 = 0x87)
-        public static void PulsarTecla(int numeroF)
+        [DllImport("user32.dll")]
+        static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);
+
+        // accion > 0: código de tecla virtual (VK) · -1/-2/-3: clic izquierdo / derecho / central
+        public static void Pulsar(int accion)
         {
-            byte vk = (byte)(0x70 + numeroF - 1);
+            if (accion < 0)
+            {
+                uint abajo = 0x0002, arriba = 0x0004;                       // izquierdo
+                if (accion == -2) { abajo = 0x0008; arriba = 0x0010; }      // derecho
+                else if (accion == -3) { abajo = 0x0020; arriba = 0x0040; } // central
+                mouse_event(abajo, 0, 0, 0, UIntPtr.Zero);
+                Thread.Sleep(30);
+                mouse_event(arriba, 0, 0, 0, UIntPtr.Zero);
+                return;
+            }
+            byte vk = (byte)accion;
             byte scan = (byte)MapVirtualKey(vk, 0);
-            keybd_event(vk, scan, 0, UIntPtr.Zero);
+            uint ext = EsExtendida(vk) ? 0x0001u : 0u;   // KEYEVENTF_EXTENDEDKEY
+            keybd_event(vk, scan, ext, UIntPtr.Zero);
             Thread.Sleep(30);
-            keybd_event(vk, scan, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            keybd_event(vk, scan, ext | KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+
+        static bool EsExtendida(int vk)
+        {
+            switch (vk)
+            {
+                case 0x21: case 0x22: case 0x23: case 0x24:   // RePág, AvPág, Fin, Inicio
+                case 0x25: case 0x26: case 0x27: case 0x28:   // flechas
+                case 0x2D: case 0x2E:                         // Insert, Supr
+                case 0x5B: case 0x5C: case 0x5D:              // Win, Win, Menú
+                case 0x6F: case 0x90:                         // Num /, Bloq Num
+                case 0xA3: case 0xA5:                         // Ctrl dcho, Alt Gr
+                    return true;
+            }
+            return false;
         }
     }
 
@@ -67,7 +97,7 @@ namespace Cafetera
         public int InicioMin = 7 * 60;
         public int FinMin = 17 * 60;
         public int IntervaloSeg = 60;
-        public int Tecla = 15;
+        public int Accion = 0x7E;   // F15. VK de la tecla, o -1/-2/-3 = clic izquierdo/derecho/central
         public bool SoloSiInactivo = true;
         public bool EvitarSuspension = true;
 
@@ -99,6 +129,70 @@ namespace Cafetera
 
         static bool LeerBool(string v) { v = v.ToLowerInvariant(); return v == "1" || v == "true" || v == "si"; }
 
+        static int LeerAccion(string v, int defecto)
+        {
+            string l = v.Trim().ToLowerInvariant();
+            if (l.StartsWith("clic:"))
+            {
+                string b = l.Substring(5);
+                return b.StartsWith("der") ? -2 : (b.StartsWith("cen") ? -3 : -1);
+            }
+            if (l.StartsWith("vk:"))
+            {
+                int vk = int.Parse(l.Substring(3));
+                return (vk > 0 && vk < 256) ? vk : defecto;
+            }
+            int n = int.Parse(l.TrimStart('f'));
+            return (n >= 1 && n <= 24) ? 0x6F + n : defecto;
+        }
+
+        static string EscribirAccion(int a)
+        {
+            if (a == -1) return "clic:izquierdo";
+            if (a == -2) return "clic:derecho";
+            if (a == -3) return "clic:central";
+            if (a >= 0x70 && a <= 0x87) return "F" + (a - 0x6F);
+            return "vk:" + a;
+        }
+
+        public static string NombreAccion(int a)
+        {
+            if (a == -1) return "Clic izquierdo";
+            if (a == -2) return "Clic derecho";
+            if (a == -3) return "Clic central";
+            if (a >= 0x70 && a <= 0x87) return "F" + (a - 0x6F);
+            if ((a >= 0x30 && a <= 0x39) || (a >= 0x41 && a <= 0x5A)) return ((char)a).ToString();
+            if (a >= 0x60 && a <= 0x69) return "Num " + (a - 0x60);
+            switch ((Keys)a)
+            {
+                case Keys.Space: return "Espacio";
+                case Keys.Return: return "Intro";
+                case Keys.Back: return "Retroceso";
+                case Keys.Tab: return "Tab";
+                case Keys.ShiftKey: case Keys.LShiftKey: case Keys.RShiftKey: return "Mayús";
+                case Keys.ControlKey: case Keys.LControlKey: case Keys.RControlKey: return "Ctrl";
+                case Keys.Menu: case Keys.LMenu: case Keys.RMenu: return "Alt";
+                case Keys.LWin: case Keys.RWin: return "Windows";
+                case Keys.Capital: return "Bloq Mayús";
+                case Keys.NumLock: return "Bloq Num";
+                case Keys.Scroll: return "Bloq Despl";
+                case Keys.Pause: return "Pausa";
+                case Keys.Insert: return "Insert";
+                case Keys.Delete: return "Supr";
+                case Keys.Home: return "Inicio";
+                case Keys.End: return "Fin";
+                case Keys.PageUp: return "Re Pág";
+                case Keys.PageDown: return "Av Pág";
+                case Keys.Up: return "Flecha arriba";
+                case Keys.Down: return "Flecha abajo";
+                case Keys.Left: return "Flecha izq.";
+                case Keys.Right: return "Flecha dcha.";
+                case Keys.Apps: return "Menú";
+                case Keys.PrintScreen: return "Impr Pant";
+            }
+            return ((Keys)a).ToString();
+        }
+
         public static Config Cargar(out bool nuevo)
         {
             Config c = new Config();
@@ -128,7 +222,7 @@ namespace Cafetera
                         case "inicio": c.InicioMin = LeerHora(v, c.InicioMin); break;
                         case "fin": c.FinMin = LeerHora(v, c.FinMin); break;
                         case "intervalo": c.IntervaloSeg = Limitar(int.Parse(v), 10, 3600); break;
-                        case "tecla": c.Tecla = Limitar(int.Parse(v.TrimStart('F', 'f')), 1, 24); break;
+                        case "tecla": c.Accion = LeerAccion(v, c.Accion); break;
                         case "solosiinactivo": c.SoloSiInactivo = LeerBool(v); break;
                         case "evitarsuspension": c.EvitarSuspension = LeerBool(v); break;
                     }
@@ -152,7 +246,7 @@ namespace Cafetera
             sb.AppendLine("inicio=" + Hora(InicioMin));
             sb.AppendLine("fin=" + Hora(FinMin));
             sb.AppendLine("intervalo=" + IntervaloSeg);
-            sb.AppendLine("tecla=F" + Tecla);
+            sb.AppendLine("tecla=" + EscribirAccion(Accion));
             sb.AppendLine("soloSiInactivo=" + (SoloSiInactivo ? "1" : "0"));
             sb.AppendLine("evitarSuspension=" + (EvitarSuspension ? "1" : "0"));
             try
@@ -302,10 +396,12 @@ namespace Cafetera
         public static readonly Color Borde = Color.FromArgb(0x3A, 0x3D, 0x44);
         public static readonly Color Texto = Color.FromArgb(0xEC, 0xED, 0xF0);
         public static readonly Color Suave = Color.FromArgb(0x95, 0x9B, 0xA5);
-        public static readonly Color Acento = Color.FromArgb(0x3D, 0xD6, 0x8C);
-        public static readonly Color AcentoHover = Color.FromArgb(0x5E, 0xE2, 0xA2);
-        public static readonly Color AcentoTexto = Color.FromArgb(0x0C, 0x26, 0x19);
+        public static readonly Color Acento = Color.FromArgb(0xEE, 0xD7, 0xFC);       // #EED7FC
+        public static readonly Color AcentoHover = Color.FromArgb(0xF6, 0xEA, 0xFE);
+        public static readonly Color AcentoTexto = Color.FromArgb(0x2E, 0x14, 0x40);
         public static readonly Color Ambar = Color.FromArgb(0xF2, 0xB8, 0x3A);
+        public static readonly Color Rojo = Color.FromArgb(0xD9, 0x3F, 0x3F);
+        public static readonly Color RojoHover = Color.FromArgb(0xE8, 0x5A, 0x5A);
 
         public static GraphicsPath Redondo(RectangleF r, float radio)
         {
@@ -519,20 +615,93 @@ namespace Cafetera
         }
     }
 
-    // ‹ valor ›  — clic en las flechas (mantener pulsado repite), rueda del ratón o cursores
+    // ‹ valor ›  — clic en las flechas (mantener pulsado repite), rueda del ratón o cursores.
+    // Opcional: clic en el centro para escribir el valor (EditableTexto) o para capturar
+    // la siguiente tecla / botón del ratón (Capturable).
     class Selector : ControlBase
     {
         int valor;
-        public int Min, Max, Paso = 1;
-        public bool Circular;
+        public int Min, Max, Paso = 1, ValorDefecto;
+        public bool Circular, EditableTexto, Capturable;
         public Func<int, string> Formato = delegate(int v) { return v.ToString(); };
+        public Func<int, string> TextoEdicion;
+        public Func<string, int> Parsear;        // int.MinValue = no válido
+        public event EventHandler Cambiado;
         int zonaHover, dir, repeticiones;
+        bool capturando, pendienteCaptura;
+        TextBox editor;
         System.Windows.Forms.Timer repetir;
+
+        public bool Capturando { get { return capturando; } }
+        public bool Editando { get { return editor != null; } }
 
         public int Valor
         {
             get { return valor; }
-            set { valor = value; Invalidate(); }
+            set
+            {
+                bool cambia = valor != value;
+                valor = value;
+                Invalidate();
+                if (cambia && Cambiado != null) Cambiado(this, EventArgs.Empty);
+            }
+        }
+
+        // ---- Escribir el valor
+        void EmpezarEdicion()
+        {
+            if (editor != null) return;
+            editor = new TextBox();
+            editor.BorderStyle = BorderStyle.None;
+            editor.BackColor = Tema.CajaHover;
+            editor.ForeColor = Tema.Texto;
+            editor.Font = new Font(Font, FontStyle.Bold);
+            editor.TextAlign = HorizontalAlignment.Center;
+            editor.Text = TextoEdicion != null ? TextoEdicion(valor) : valor.ToString();
+            int h = editor.PreferredHeight;
+            editor.SetBounds(Height, (Height - h) / 2, Width - 2 * Height, h);
+            editor.KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; TerminarEdicion(true); }
+                else if (e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; TerminarEdicion(false); }
+            };
+            editor.LostFocus += delegate { TerminarEdicion(true); };
+            Controls.Add(editor);
+            Invalidate();
+            editor.Focus();
+            editor.SelectAll();
+        }
+
+        public void CerrarEdicion() { TerminarEdicion(true); }
+
+        void TerminarEdicion(bool aplicar)
+        {
+            if (editor == null) return;
+            TextBox ed = editor;
+            editor = null;
+            if (aplicar && Parsear != null)
+            {
+                int v = Parsear(ed.Text);
+                if (v != int.MinValue) Valor = Math.Max(Min, Math.Min(Max, v));
+            }
+            Controls.Remove(ed);
+            ed.Dispose();
+            Invalidate();
+        }
+
+        // ---- Capturar tecla o botón
+        void TerminarCaptura(int nuevo)
+        {
+            capturando = false;
+            Capture = false;
+            if (nuevo != int.MinValue) Valor = nuevo;
+            Invalidate();
+        }
+
+        protected override void OnMouseCaptureChanged(EventArgs e)
+        {
+            if (capturando && !Capture) { capturando = false; Invalidate(); }
+            base.OnMouseCaptureChanged(e);
         }
 
         public Selector()
@@ -551,6 +720,7 @@ namespace Cafetera
 
         void Mover(int pasos)
         {
+            if (Capturable && (valor < Min || valor > Max)) { Valor = ValorDefecto; return; }   // de tecla/clic propio a F13-F24
             int v = valor + pasos * Paso;
             if (Circular)
             {
@@ -577,11 +747,23 @@ namespace Cafetera
         protected override void OnMouseLeave(EventArgs e) { zonaHover = 0; repetir.Stop(); base.OnMouseLeave(e); }
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            if (capturando)
+            {
+                int b = e.Button == MouseButtons.Left ? -1 : (e.Button == MouseButtons.Right ? -2 :
+                        (e.Button == MouseButtons.Middle ? -3 : int.MinValue));
+                TerminarCaptura(b);
+                return;
+            }
             Focus();
             if (e.Button == MouseButtons.Left)
             {
                 dir = Zona(e.X);
-                if (dir != 0)
+                if (dir == 0)
+                {
+                    if (EditableTexto) EmpezarEdicion();
+                    else if (Capturable) pendienteCaptura = true;
+                }
+                else
                 {
                     Mover(dir);
                     repeticiones = 0;
@@ -591,24 +773,52 @@ namespace Cafetera
             }
             base.OnMouseDown(e);
         }
-        protected override void OnMouseUp(MouseEventArgs e) { repetir.Stop(); base.OnMouseUp(e); }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            repetir.Stop();
+            base.OnMouseUp(e);
+            if (pendienteCaptura)
+            {
+                pendienteCaptura = false;
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    capturando = true;
+                    Focus();
+                    Capture = true;   // el siguiente clic (en cualquier parte de la ventana) llega aquí
+                    Invalidate();
+                });
+            }
+        }
         protected override void OnMouseWheel(MouseEventArgs e)
         {
+            if (capturando || editor != null) return;
             Mover(e.Delta > 0 ? 1 : -1);
             base.OnMouseWheel(e);
         }
         protected override bool IsInputKey(Keys k)
         {
+            if (capturando) return true;
             return k == Keys.Up || k == Keys.Down || k == Keys.Left || k == Keys.Right || base.IsInputKey(k);
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            if (capturando)
+            {
+                e.Handled = true; e.SuppressKeyPress = true;
+                TerminarCaptura(e.KeyCode == Keys.Escape ? int.MinValue : (int)e.KeyCode);
+                return;
+            }
             if (e.KeyCode == Keys.Up || e.KeyCode == Keys.Right) { Mover(1); e.Handled = true; }
             else if (e.KeyCode == Keys.Down || e.KeyCode == Keys.Left) { Mover(-1); e.Handled = true; }
             base.OnKeyDown(e);
         }
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
-        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+        protected override void OnLostFocus(EventArgs e)
+        {
+            if (capturando && !ContainsFocus) TerminarCaptura(int.MinValue);
+            Invalidate();
+            base.OnLostFocus(e);
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -626,7 +836,8 @@ namespace Cafetera
                     using (SolidBrush b = new SolidBrush(Tema.CajaHover)) g.FillRectangle(b, zx, 0, Height, Height);
                     g.ResetClip();
                 }
-                using (Pen borde = new Pen(Focused ? Tema.Acento : Tema.Caja, 1f)) g.DrawPath(borde, p);
+                Color cb = capturando ? Tema.Ambar : ((Focused || editor != null) ? Tema.Acento : Tema.Caja);
+                using (Pen borde = new Pen(cb, capturando ? 1.6f : 1f)) g.DrawPath(borde, p);
             }
             float s = Height * 0.13f;
             using (Pen flecha = new Pen(Tema.Suave, Math.Max(1.5f, Height * 0.06f)))
@@ -637,15 +848,18 @@ namespace Cafetera
                 cx = Width - Height / 2f;
                 g.DrawLines(flecha, new PointF[] { new PointF(cx - s / 2, cy - s), new PointF(cx + s / 2, cy), new PointF(cx - s / 2, cy + s) });
             }
+            if (editor != null) return;
             using (Font negrita = new Font(Font, FontStyle.Bold))
-                Tema.Texto_(g, Formato(valor), negrita, new Rectangle(Height, 0, Width - 2 * Height, Height),
-                            Tema.Texto, TextFormatFlags.HorizontalCenter);
+                Tema.Texto_(g, capturando ? "Pulsa…" : Formato(valor), negrita,
+                            new Rectangle(Height, 0, Width - 2 * Height, Height),
+                            capturando ? Tema.Ambar : Tema.Texto,
+                            TextFormatFlags.HorizontalCenter | TextFormatFlags.EndEllipsis);
         }
     }
 
     class Boton : ControlBase
     {
-        public bool Primario;
+        public bool Primario, Peligro;
         public Boton(string texto, bool primario) { Text = texto; Primario = primario; Size = new Size(110, 36); }
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -653,12 +867,14 @@ namespace Cafetera
             g.Clear(BackColor);
             Tema.Suavizar(g);
             Color fondo = Primario ? (encima ? Tema.AcentoHover : Tema.Acento) : (encima ? Tema.CajaHover : Tema.Caja);
+            if (Peligro) fondo = encima ? Tema.RojoHover : Tema.Rojo;
             RectangleF r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
             using (GraphicsPath p = Tema.Redondo(r, r.Height * 0.3f))
             using (SolidBrush b = new SolidBrush(fondo))
                 g.FillPath(b, p);
             using (Font negrita = new Font(Font, FontStyle.Bold))
-                Tema.Texto_(g, Text, negrita, ClientRectangle, Primario ? Tema.AcentoTexto : Tema.Texto,
+                Tema.Texto_(g, Text, negrita, ClientRectangle,
+                            Peligro ? Color.White : (Primario ? Tema.AcentoTexto : Tema.Texto),
                             TextFormatFlags.HorizontalCenter);
         }
     }
@@ -714,6 +930,76 @@ namespace Cafetera
         }
     }
 
+    // ------------------------------------------------------------------ Modal oscuro: confirmar cierre
+    class ConfirmarCierre : Form
+    {
+        public static bool Preguntar(Form padre, Icon icono)
+        {
+            using (ConfirmarCierre f = new ConfirmarCierre(icono))
+                return f.ShowDialog(padre) == DialogResult.OK;
+        }
+
+        ConfirmarCierre(Icon icono)
+        {
+            SuspendLayout();
+            AutoScaleDimensions = new SizeF(96F, 96F);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            Font = new Font("Segoe UI", 9.75F);
+            Text = "Cerrar Cafetera";
+            Icon = icono;
+            BackColor = Tema.Fondo;
+            ForeColor = Tema.Texto;
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            MaximizeBox = false; MinimizeBox = false;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.CenterParent;
+            TopMost = true;
+            ClientSize = new Size(420, 176);
+
+            Label titulo = new Label();
+            titulo.Text = "¿Cerrar Cafetera del todo?";
+            titulo.Font = new Font("Segoe UI Semibold", 12.5F);
+            titulo.ForeColor = Tema.Texto;
+            titulo.AutoSize = true;
+            titulo.Location = new Point(20, 18);
+            Controls.Add(titulo);
+
+            Label texto = new Label();
+            texto.Text = "La app se cerrará también en segundo plano: dejará de pulsar y " +
+                         "desaparecerá el icono de la barra de tareas.\nSi solo quieres pausarla, " +
+                         "usa el modo \"Apagada\" o haz un clic en el icono.";
+            texto.ForeColor = Tema.Suave;
+            texto.Location = new Point(20, 52);
+            texto.Size = new Size(380, 64);
+            Controls.Add(texto);
+
+            Boton cerrar = new Boton("Cerrar app", false);
+            cerrar.Peligro = true;
+            cerrar.Location = new Point(420 - 20 - 110, 124);
+            cerrar.Click += delegate { DialogResult = DialogResult.OK; Close(); };
+            Boton cancelar = new Boton("Cancelar", false);
+            cancelar.Location = new Point(420 - 20 - 110 - 12 - 110, 124);
+            cancelar.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
+            Controls.Add(cerrar);
+            Controls.Add(cancelar);
+
+            KeyPreview = true;
+            KeyDown += delegate(object s, KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Escape) { DialogResult = DialogResult.Cancel; Close(); }
+            };
+
+            ResumeLayout(false);
+            PerformLayout();
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Tema.TituloOscuro(this);
+        }
+    }
+
     // ------------------------------------------------------------------ Ventana de configuración (modo oscuro)
     class FormConfig : Form
     {
@@ -728,6 +1014,8 @@ namespace Cafetera
 
         public Config Resultado;
         public bool IniciarConWindows;
+        public bool SalirDeLaApp;
+        Label lblTeclaAyuda;
 
         static string Hora(int min) { return (min / 60).ToString("00") + ":" + (min % 60).ToString("00"); }
 
@@ -736,6 +1024,25 @@ namespace Cafetera
             if (s < 60) return s + " s";
             if (s % 60 == 0) return (s / 60) + " min";
             return (s / 60) + " min " + (s % 60) + " s";
+        }
+
+        static string MinSeg(int s) { return (s / 60).ToString("00") + ":" + (s % 60).ToString("00"); }
+
+        // Acepta "1:30", "90", "90s", "2m", "2min", "2m30s", "2 min 30 s"
+        static int LeerIntervalo(string t)
+        {
+            t = t.Trim().ToLowerInvariant().Replace(" ", "");
+            int m, s;
+            string[] p = t.Split(':');
+            if (p.Length == 2 && int.TryParse(p[0], out m) && int.TryParse(p[1], out s)) return m * 60 + s;
+            Match r = Regex.Match(t, @"^(?:(\d+)m(?:in)?)?(?:(\d+)s?)?$");
+            if (r.Success && (r.Groups[1].Success || r.Groups[2].Success))
+            {
+                m = r.Groups[1].Success ? int.Parse(r.Groups[1].Value) : 0;
+                s = r.Groups[2].Success ? int.Parse(r.Groups[2].Value) : 0;
+                return m * 60 + s;
+            }
+            return int.MinValue;
         }
 
         static string Hace(double seg)
@@ -814,24 +1121,36 @@ namespace Cafetera
             selHasta = SelectorHora(tHor, ancho - 16 - 132, 90, cfg.FinMin);
 
             // ---------- Pulsación
-            Tarjeta tPul = Tarjeta_("Pulsación", der, 168, ancho, 150);
+            Tarjeta tPul = Tarjeta_("Pulsación", der, 168, ancho, 200);
+            Font chica = new Font("Segoe UI", 8F);
             Etiqueta(tPul, "Tecla", 16, 46, Font, Tema.Texto);
             selTecla = new Selector();
-            selTecla.Min = 13; selTecla.Max = 24; selTecla.Paso = 1; selTecla.Circular = true;
-            selTecla.Formato = delegate(int v) { return "F" + v; };
-            selTecla.Valor = (cfg.Tecla >= 13 && cfg.Tecla <= 24) ? cfg.Tecla : 15;
-            selTecla.Location = new Point(ancho - 16 - 132, 38);
+            selTecla.Min = 0x7C; selTecla.Max = 0x87; selTecla.Paso = 1; selTecla.Circular = true;  // flechas: F13-F24
+            selTecla.ValorDefecto = 0x7E;
+            selTecla.Capturable = true;
+            selTecla.Formato = Config.NombreAccion;
+            selTecla.Valor = cfg.Accion;
+            selTecla.Size = new Size(180, 34);
+            selTecla.Location = new Point(ancho - 16 - 180, 38);
             tPul.Controls.Add(selTecla);
+            lblTeclaAyuda = Etiqueta(tPul, "", 16, 76, chica, Tema.Suave);
+            selTecla.Cambiado += delegate { AyudaTecla(); };
+            AyudaTecla();
 
-            Etiqueta(tPul, "Cada", 16, 86, Font, Tema.Texto);
+            Etiqueta(tPul, "Cada", 16, 108, Font, Tema.Texto);
             selIntervalo = new Selector();
             selIntervalo.Min = 10; selIntervalo.Max = 3600; selIntervalo.Paso = 5;
             selIntervalo.Formato = Intervalo;
+            selIntervalo.EditableTexto = true;
+            selIntervalo.TextoEdicion = MinSeg;
+            selIntervalo.Parsear = LeerIntervalo;
             selIntervalo.Valor = cfg.IntervaloSeg;
-            selIntervalo.Location = new Point(ancho - 16 - 132, 78);
+            selIntervalo.Size = new Size(180, 34);
+            selIntervalo.Location = new Point(ancho - 16 - 180, 100);
             tPul.Controls.Add(selIntervalo);
+            Etiqueta(tPul, "Clic en el centro para escribirlo (mm:ss)", 16, 138, chica, Tema.Suave);
 
-            swInactivo = Fila(tPul, "Solo si no estoy tocando nada", 118, cfg.SoloSiInactivo, ancho);
+            swInactivo = Fila(tPul, "Solo si no estoy tocando nada", 164, cfg.SoloSiInactivo, ancho);
 
             // ---------- Botones
             Boton guardar = new Boton("Guardar", true);
@@ -843,9 +1162,22 @@ namespace Cafetera
             Controls.Add(guardar);
             Controls.Add(cancelar);
 
+            Boton salir = new Boton("Cerrar app", false);
+            salir.Peligro = true;
+            salir.Location = new Point(der, 380);
+            salir.Click += delegate
+            {
+                if (!ConfirmarCierre.Preguntar(this, icono)) return;
+                SalirDeLaApp = true;
+                DialogResult = DialogResult.Abort;
+                Close();
+            };
+            Controls.Add(salir);
+
             KeyPreview = true;
             KeyDown += delegate(object s, KeyEventArgs e)
             {
+                if (selTecla.Capturando || selIntervalo.Editando) return;
                 if (e.KeyCode == Keys.Escape) { DialogResult = DialogResult.Cancel; Close(); }
                 else if (e.KeyCode == Keys.Enter) Guardar();
             };
@@ -895,15 +1227,30 @@ namespace Cafetera
             lblInactivo.Text = "Windows te ve inactivo desde " + Hace(Nativo.SegundosInactivo());
         }
 
+        void AyudaTecla()
+        {
+            if (selTecla.Valor < 0)
+            {
+                lblTeclaAyuda.Text = "Ojo: hará clic donde esté el ratón";
+                lblTeclaAyuda.ForeColor = Tema.Ambar;
+            }
+            else
+            {
+                lblTeclaAyuda.Text = "Clic en el centro y pulsa una tecla o botón del ratón";
+                lblTeclaAyuda.ForeColor = Tema.Suave;
+            }
+        }
+
         void Guardar()
         {
+            selIntervalo.CerrarEdicion();
             Config c = new Config();
             c.Modo = segModo.Seleccion == 1 ? Modo.SiempreActivo : (segModo.Seleccion == 2 ? Modo.Desactivado : Modo.Horario);
             for (int i = 0; i < 7; i++) c.Dias[(i + 1) % 7] = dias[i].Checked;
             c.InicioMin = selDesde.Valor;
             c.FinMin = selHasta.Valor;
             c.IntervaloSeg = selIntervalo.Valor;
-            c.Tecla = selTecla.Valor;
+            c.Accion = selTecla.Valor;
             c.SoloSiInactivo = swInactivo.Checked;
             c.EvitarSuspension = swSuspension.Checked;
             Resultado = c;
@@ -973,7 +1320,7 @@ namespace Cafetera
 
         public void ProbarAhora()
         {
-            Nativo.PulsarTecla(cfg.Tecla);
+            Nativo.Pulsar(cfg.Accion);
             ultimaPulsacion = DateTime.Now;
             pulsaciones++;
         }
@@ -1049,7 +1396,7 @@ namespace Cafetera
                 InicioWindows.Establecer(true);
                 icono.ShowBalloonTip(6000, "Cafetera",
                     "Estoy aquí, junto al reloj. Activa " + cfg.ResumenHorario() +
-                    ", pulsando F" + cfg.Tecla + " cada " + cfg.IntervaloSeg + " s.\nClic derecho para configurar.",
+                    ", pulsando " + Config.NombreAccion(cfg.Accion) + " cada " + cfg.IntervaloSeg + " s.\nClic derecho para configurar.",
                     ToolTipIcon.Info);
             }
             else if (InicioWindows.Activo())
@@ -1086,7 +1433,7 @@ namespace Cafetera
 
             if (toca)
             {
-                Nativo.PulsarTecla(cfg.Tecla);
+                Nativo.Pulsar(cfg.Accion);
                 ultimaPulsacion = ahora;
                 pulsaciones++;
             }
@@ -1105,7 +1452,7 @@ namespace Cafetera
         public string TextoEstado()
         {
             if (estadoActual == 0)
-                return "Activa: F" + cfg.Tecla + " cada " + cfg.IntervaloSeg + " s" +
+                return "Activa: " + Config.NombreAccion(cfg.Accion) + " cada " + cfg.IntervaloSeg + " s" +
                        (cfg.Modo == Modo.SiempreActivo ? " (siempre)" : "");
             if (estadoActual == 1) return "En espera (" + cfg.ResumenHorario() + ")";
             return "Desactivada";
@@ -1160,11 +1507,14 @@ namespace Cafetera
         {
             if (configAbierta) return;
             configAbierta = true;
+            bool salir = false;
             try
             {
                 using (FormConfig f = new FormConfig(cfg.Clonar(), InicioWindows.Activo(), icoVentana, this))
                 {
-                    if (f.ShowDialog() == DialogResult.OK && f.Resultado != null)
+                    f.ShowDialog();
+                    if (f.SalirDeLaApp) salir = true;
+                    else if (f.DialogResult == DialogResult.OK && f.Resultado != null)
                     {
                         Config nueva = f.Resultado;
                         if (nueva.Modo != Modo.Desactivado) nueva.ModoAnterior = nueva.Modo;
@@ -1178,6 +1528,7 @@ namespace Cafetera
                 }
             }
             finally { configAbierta = false; }
+            if (salir) Salir();
         }
 
         void Salir()
