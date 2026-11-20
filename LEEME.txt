@@ -12,15 +12,19 @@ Uso
 ---
 - Ejecuta Cafetera.exe. No abre ventana: aparece un ojo junto al reloj.
   (En Windows 11 puede quedar escondida en la flecha ^; arrastrala fuera.)
-- Ojo abierto = activa; ojo cerrado negro = en espera
-  (fuera de horario); ojo cerrado gris = desactivada.
+- Icono: ojo = siempre activa; ojo con reloj = segun horario;
+  ojo cerrado gris = apagada.
 - Clic derecho: cambiar modo (Segun horario / Siempre activa / Desactivada),
   Configuracion..., Iniciar con Windows, Salir.
-- 2 clics en el ojo: activa / desactiva.
-- 3 clics en el ojo: abre la configuracion (modo oscuro). Arriba a la
+- 1 clic en el ojo: apaga / vuelve a encender en el modo que tenia antes
+  (Segun horario o Siempre).
+- Doble clic en el ojo: abre la configuracion (modo oscuro). Arriba a la
   izquierda ves la hora de la ultima pulsacion, cuantas lleva y cuanto
   tiempo lleva Windows sin detectar actividad (si funciona, nunca pasa
   mucho del intervalo). "Probar ahora" pulsa la tecla al momento.
+  Abajo, grafica de la ultima hora: inactivo / teclado o raton / clic,
+  con un punto amarillo en cada autopulsacion. Solo registra que hubo
+  actividad, nunca que teclas se pulsan.
 
 Por defecto: lunes a viernes de 07:00 a 17:00, F15 cada 60 s, solo si no
 has tocado teclado/raton en ese minuto, e iniciar con Windows activado.
